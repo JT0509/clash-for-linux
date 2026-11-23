@@ -1,0 +1,121 @@
+# ============================================================================
+# mihomo (Clash.Meta) 主配置模板 —— Linux / Debian & Ubuntu
+# 由 clash-for-linux 提供
+#
+# 使用方式二选一：
+#   A. 自动导入（推荐）： sudo scripts/import-subscription.sh "<你的订阅链接>"
+#   B. 手动：把下面 proxy-providers.subscription.url 改成你的订阅链接，
+#            然后复制本文件到 /etc/mihomo/config.yaml
+#
+# ⚠️ 安全提醒：真实订阅链接是账号凭证，绝不要提交到公开仓库。
+# ============================================================================
+
+# ---- 基础端口（与 Clash for Windows 保持一致，方便直接迁移）----
+mixed-port: 7890          # HTTP + SOCKS5 混合端口
+allow-lan: false          # 是否允许局域网设备使用本机代理
+bind-address: "*"
+mode: rule
+log-level: info
+ipv6: true
+
+# ---- 控制端（供网页面板 / Clash Verge / 手机端调用）----
+external-controller: 127.0.0.1:9090
+external-ui: ui           # 网页面板目录（install-cli.sh 会按需下载）
+# secret: "请改成随机字符串"   # 如需暴露到局域网，务必设置密码
+
+# ---- DNS（fake-ip 模式，TUN 模式依赖它）----
+dns:
+  enable: true
+  listen: 0.0.0.0:1053    # 用 1053 避开 systemd-resolved 占用的 53
+  ipv6: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+  fallback:
+    - https://1.1.1.1/dns-query
+    - https://8.8.8.8/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+    domain:
+      - +.google.com
+      - +.facebook.com
+      - +.youtube.com
+      - +.twitter.com
+
+# ---- TUN 模式（等价于 Clash for Windows 的 TUN 开关；需要 root）----
+tun:
+  enable: true
+  stack: mixed            # system / gvisor / mixed（mixed 兼容性最好）
+  auto-route: true        # 自动接管全局路由
+  auto-detect-interface: true
+  auto-redirect: true     # 用 nftables 重定向 TCP/UDP（Linux）
+  dns-hijack:
+    - any:53
+  device: mihomo
+  strict-route: false     # 置 true 会强制全局走 TUN，可能影响局域网
+  mtu: 9000
+
+# ---- GeoIP/GeoSite 数据源（国内网络友好，避免拉 GitHub 失败）----
+geodata-mode: false
+geo-auto-update: false
+geox-url:
+  geoip: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+  geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+  mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+
+# ---- 订阅（proxy-provider）----
+proxy-providers:
+  subscription:
+    type: http
+    url: "https://example.com/your-subscription-url"   # ← 替换成你的订阅链接
+    interval: 86400
+    path: ./providers/subscription.yaml
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+
+# ---- 策略组 ----
+proxy-groups:
+  - name: PROXY
+    type: select
+    use:
+      - subscription
+  - name: AUTO
+    type: url-test
+    use:
+      - subscription
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+  - name: 国内网站
+    type: select
+    proxies:
+      - DIRECT
+      - PROXY
+  - name: 漏网之鱼
+    type: select
+    proxies:
+      - PROXY
+      - DIRECT
+
+# ---- 分流规则（可按需增删）----
+rules:
+  - DOMAIN-SUFFIX,local,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,time.is,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,漏网之鱼
