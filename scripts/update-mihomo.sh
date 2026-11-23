@@ -8,6 +8,8 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 need_root
+# 默认查最新版；查询失败则退回内置默认版本
+MIHOMO_VERSION="$(latest_tag "${MIHOMO_REPO}" "${DEFAULT_MIHOMO_VERSION}")"
 install_mihomo
 
 if systemctl list-unit-files 2>/dev/null | grep -q '^mihomo.service'; then

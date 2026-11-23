@@ -7,13 +7,14 @@
 处理：使用镜像前缀（脚本所有 GitHub 请求都会自动加前缀）：
 
 ```bash
-GH_PROXY=https://ghfast.top/ sudo -E ./install.sh
+sudo -E ./install.sh          # 脚本会自动尝试 gh-proxy.com 等镜像
+GH_PROXY=https://gh-proxy.com/ sudo -E ./install.sh   # 或手动指定
 ```
 
 或指定版本与镜像：
 
 ```bash
-MIHOMO_VERSION=v1.19.8 GH_PROXY=https://ghfast.top/ sudo -E ./scripts/update-mihomo.sh
+MIHOMO_VERSION=v1.19.34 GH_PROXY=https://gh-proxy.com/ sudo -E ./scripts/update-mihomo.sh
 ```
 
 > 镜像只影响 GitHub 直链；请确保你信任所用镜像。

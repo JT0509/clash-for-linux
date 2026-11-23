@@ -9,8 +9,13 @@ REPO_BRANCH="main"
 MIHOMO_REPO="MetaCubeX/mihomo"
 VERGE_REPO="clash-verge-rev/clash-verge-rev"
 
-# 国内网络访问 GitHub 较慢时，可设置镜像前缀，例如：
-#   GH_PROXY=https://ghfast.top/ sudo -E ./install.sh
+# 固定默认版本：不依赖 GitHub API，适合无加速器环境
+DEFAULT_MIHOMO_VERSION="v1.19.34"
+DEFAULT_VERGE_VERSION="v2.5.10"
+MIHOMO_VERSION="${MIHOMO_VERSION:-}"
+VERGE_VERSION="${VERGE_VERSION:-}"
+
+# 可选镜像前缀（依次尝试，留空表示直连）
 GH_PROXY="${GH_PROXY:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,87 +61,108 @@ install_deps() {
     ca-certificates curl gzip iproute2 nftables unzip
 }
 
-gh_url() { printf '%s%s' "${GH_PROXY}" "$1"; }
-
-# 获取仓库最新 release 的 tag（如 v1.19.8）
-latest_tag() {
-  local repo="$1" json tag
-  json="$(curl -fsSL --connect-timeout 15 --max-time 40 \
-    "$(gh_url "https://api.github.com/repos/${repo}/releases/latest")")" \
-    || die "无法获取 ${repo} 最新版本。国内网络可尝试：GH_PROXY=https://ghfast.top/ sudo -E $0"
-  tag="$(printf '%s' "$json" \
-    | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
-    | head -n1 \
-    | sed 's/.*"\([^"]*\)"$/\1/')"
-  [ -n "${tag}" ] || die "解析 ${repo} 版本号失败"
-  printf '%s' "${tag}"
+# ---------- 下载：直连 + 多个镜像依次尝试 ----------
+mirror_prefixes() {
+  printf '%s\n' "" "${GH_PROXY}" "https://gh-proxy.com/" \
+    "https://ghfast.top/" "https://ghproxy.net/"
 }
 
-# 在指定 release 中按正则找第一个资产下载地址
-asset_url() {
-  local repo="$1" tag="$2" re="$3" json url
-  json="$(curl -fsSL --connect-timeout 15 --max-time 40 \
-    "$(gh_url "https://api.github.com/repos/${repo}/releases/tags/${tag}")")" \
-    || return 1
-  url="$(printf '%s' "${json}" \
-    | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
-    | sed 's/.*"\(https\?[^"]*\)"$/\1/' \
-    | grep -E "${re}" | head -n1)"
-  [ -n "${url}" ] || return 1
-  printf '%s' "${url}"
+download_with_mirrors() {
+  local url="$1" out="$2" p cand
+  while IFS= read -r p; do
+    if [ -z "${p}" ]; then
+      cand="${url}"
+    else
+      cand="${p%/}/${url}"
+    fi
+    info "下载：${cand}"
+    if curl -fL --retry 2 --retry-delay 1 --connect-timeout 15 --max-time 600 \
+         -o "${out}" --progress-bar "${cand}"; then
+      return 0
+    fi
+    warn "该通道失败，尝试下一个"
+  done < <(mirror_prefixes)
+  return 1
 }
 
 download() {
-  local url="$1" out="$2"
-  info "下载：${url}"
-  curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 \
-    -o "${out}" --progress-bar "${url}" || die "下载失败：${url}"
+  download_with_mirrors "$1" "$2" || die "下载失败：$1"
 }
 
-# 不报错的下载，返回 0/1，用于可选组件
-try_download() {
-  local url="$1" out="$2"
-  curl -fL --retry 2 --connect-timeout 15 --max-time 180 \
-    -o "${out}" --silent --show-error "${url}"
+download_optional() {
+  download_with_mirrors "$1" "$2" >/dev/null 2>&1
 }
 
-# 优先取本地仓库文件，缺失时回退到 GitHub raw
+# 获取最新 tag，失败时返回默认值
+latest_tag() {
+  local repo="$1" def="${2:-}" json tag p
+  for p in "" "${GH_PROXY}" "https://gh-proxy.com/"; do
+    [ -n "${p}" ] && p="${p%/}/"
+    json="$(curl -fsSL --connect-timeout 10 --max-time 30 \
+      "${p}https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null)" || continue
+    tag="$(printf '%s' "${json}" \
+      | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
+      | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    [ -n "${tag}" ] && { printf '%s' "${tag}"; return 0; }
+  done
+  [ -n "${def}" ] && { printf '%s' "${def}"; return 0; }
+  return 1
+}
+
+# 优先使用本地仓库文件，其次 GitHub raw，最后 jsDelivr
 fetch_repo_file() {
   local rel="$1" dest="$2"
   if [ -f "${REPO_DIR}/${rel}" ]; then
     cp "${REPO_DIR}/${rel}" "${dest}"
-  else
-    download "$(gh_url "https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_BRANCH}/${rel}")" "${dest}"
+    return 0
   fi
+  if download_optional \
+      "https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_BRANCH}/${rel}" "${dest}"; then
+    return 0
+  fi
+  download "https://cdn.jsdelivr.net/gh/${REPO_SLUG}@${REPO_BRANCH}/${rel}" "${dest}"
 }
 
-# 下载并安装 mihomo 内核到 /usr/local/bin/mihomo
+# 安装 mihomo：优先用仓库内置压缩包（零下载），否则从 release 下载
 install_mihomo() {
-  local arch tag url tmp
+  local arch tag tmp url asset found=0
   arch="$(detect_arch)"
-  tag="${MIHOMO_VERSION:-$(latest_tag "${MIHOMO_REPO}")}"
-  info "mihomo 目标版本：${tag}"
-
-  # 优先 compatible 构建（兼容老 CPU），没有则用普通构建
-  url="$(asset_url "${MIHOMO_REPO}" "${tag}" "mihomo-linux-${arch}-compatible-${tag}\\.gz$" || true)"
-  if [ -z "${url}" ]; then
-    url="$(asset_url "${MIHOMO_REPO}" "${tag}" "mihomo-linux-${arch}-${tag}\\.gz$" || true)"
-  fi
-  [ -n "${url}" ] || die "未找到 mihomo ${tag} 的 ${arch} 安装包"
-
+  tag="${MIHOMO_VERSION:-${DEFAULT_MIHOMO_VERSION}}"
   tmp="$(mktemp -d)"
-  download "${url}" "${tmp}/mihomo.gz"
-  gzip -dc "${tmp}/mihomo.gz" > "${tmp}/mihomo"
+
+  local bundled="${REPO_DIR}/bin/mihomo-linux-${arch}.gz"
+  if [ -f "${bundled}" ]; then
+    info "使用仓库内置内核：${bundled}"
+    gzip -t "${bundled}" || { rm -rf "${tmp}"; die "内置内核压缩包损坏"; }
+    gzip -dc "${bundled}" > "${tmp}/mihomo"
+  else
+    info "mihomo 版本：${tag}（${arch}）"
+    for asset in \
+      "mihomo-linux-${arch}-compatible-${tag}.gz" \
+      "mihomo-linux-${arch}-${tag}.gz"; do
+      url="https://github.com/${MIHOMO_REPO}/releases/download/${tag}/${asset}"
+      if download_with_mirrors "${url}" "${tmp}/mihomo.gz"; then
+        found=1
+        break
+      fi
+    done
+    if [ "${found}" -ne 1 ]; then
+      rm -rf "${tmp}"
+      die "内核下载失败。可在有网络的机器下载 ${arch} 版 mihomo 后放到 ${REPO_DIR}/bin/mihomo-linux-${arch}.gz"
+    fi
+    gzip -dc "${tmp}/mihomo.gz" > "${tmp}/mihomo"
+  fi
+
   install -m 0755 "${tmp}/mihomo" "${MIHOMO_BIN}"
   rm -rf "${tmp}"
   log "mihomo 已安装：$("${MIHOMO_BIN}" -v)"
 }
 
-# 开启内核转发，并确保 /dev/net/tun 存在（TUN 模式必需）
+# 开启内核转发，确保 /dev/net/tun（TUN 模式必需）
 setup_tun() {
   modprobe tun 2>/dev/null || true
   if [ ! -e /dev/net/tun ]; then
-    warn "未发现 /dev/net/tun，TUN 模式可能不可用（请在宿主机/虚拟化平台开启 TUN 设备）"
+    warn "未发现 /dev/net/tun，TUN 模式可能不可用"
   fi
   cat > /etc/sysctl.d/99-mihomo-tun.conf <<'EOF'
 # clash-for-linux: mihomo TUN 模式所需的内核转发
@@ -159,25 +185,29 @@ install_service() {
   log "已安装并启用 systemd 服务：mihomo.service"
 }
 
-# 可选：下载网页面板（Metacubexd，失败则回退 Yacd）
+# 可选网页面板（失败不影响代理）
 install_dashboard() {
   local tmp
   tmp="$(mktemp -d)"
   install -d "${CONFIG_DIR}/ui"
 
-  if try_download "https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz" "${tmp}/ui.tgz"; then
+  if download_optional \
+      "https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz" \
+      "${tmp}/ui.tgz"; then
     tar -xzf "${tmp}/ui.tgz" -C "${CONFIG_DIR}/ui" 2>/dev/null \
       && log "网页面板 Metacubexd 已安装"
-  elif try_download "https://github.com/haishanh/yacd/archive/refs/heads/gh-pages.zip" "${tmp}/yacd.zip"; then
+  elif download_optional \
+      "https://github.com/haishanh/yacd/archive/refs/heads/gh-pages.zip" \
+      "${tmp}/yacd.zip"; then
     unzip -q "${tmp}/yacd.zip" -d "${tmp}/yacd" 2>/dev/null \
       && cp -r "${tmp}"/yacd/*/ "${CONFIG_DIR}/ui/" 2>/dev/null \
       && log "网页面板 Yacd 已安装"
   else
-    warn "网页面板下载失败（不影响代理），可稍后手动安装到 ${CONFIG_DIR}/ui"
+    warn "网页面板下载失败（不影响代理），可跳过"
   fi
 
   if [ -f "${CONFIG_DIR}/ui/index.html" ]; then
-    info "面板入口：http://127.0.0.1:9090/ui（需 SSH 端口转发）"
+    info "面板入口：http://127.0.0.1:9090/ui（经 SSH 隧道访问）"
   fi
   rm -rf "${tmp}"
 }

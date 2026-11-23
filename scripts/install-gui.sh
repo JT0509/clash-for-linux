@@ -10,11 +10,11 @@ require_debian
 install_deps
 
 arch="$(detect_arch)"
-tag="${VERGE_VERSION:-$(latest_tag "${VERGE_REPO}")}"
+tag="${VERGE_VERSION:-${DEFAULT_VERGE_VERSION}}"
+ver="${tag#v}"
 info "Clash Verge Rev 目标版本：${tag}"
 
-url="$(asset_url "${VERGE_REPO}" "${tag}" "(_${arch}\\.deb$|_x86_64\\.deb$|${arch}\\.deb$)" || true)"
-[ -n "${url}" ] || die "未找到 Clash Verge Rev ${tag} 的 ${arch} .deb 安装包"
+url="https://github.com/${VERGE_REPO}/releases/download/${tag}/Clash.Verge_${ver}_${arch}.deb"
 
 tmp="$(mktemp -d)"
 download "${url}" "${tmp}/clash-verge.deb"

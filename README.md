@@ -13,6 +13,7 @@
 - Debian 12+ / Ubuntu 22.04+，`amd64`（兼容 `arm64`）
 - root 或 sudo
 - TUN 模式需 `/dev/net/tun` 与 nftables
+- 网络：能 `git clone` 即可；**内核已内置**（`bin/mihomo-linux-amd64.gz`），安装时无需下载 Release
 
 ## 快速开始
 
@@ -39,11 +40,18 @@ MODE=gui  sudo -E ./install.sh
 MODE=both sudo -E ./install.sh
 ```
 
-GitHub 下载慢时加镜像：
+### 没有加速器 / 网络受限
+
+- CLI 模式的内核已随仓库分发，**不会下载内核**。
+- GUI 的 `.deb` 由脚本自动尝试 `gh-proxy.com`、`ghfast.top`、`ghproxy.net` 镜像。
+- `git clone` 本身很慢或失败时，用镜像下 zip：
 
 ```bash
-GH_PROXY=https://ghfast.top/ MODE=cli sudo -E ./install.sh
+curl -L -o clash.zip https://gh-proxy.com/https://github.com/JT0509/clash-for-linux/archive/refs/heads/main.zip
+unzip clash.zip && cd clash-for-linux-main
 ```
+
+- 也可手动指定镜像：`GH_PROXY=https://gh-proxy.com/ MODE=cli sudo -E ./install.sh`
 
 ### 导入订阅（必做）
 
@@ -143,6 +151,7 @@ clash-for-linux/
 ├── config/
 │   ├── config.template.yaml       # HTTP provider 模板
 │   └── config.file-provider.yaml  # 本地文件 provider 模板
+├── bin/mihomo-linux-amd64.gz      # 内置内核（v1.19.34，免下载）
 ├── systemd/mihomo.service
 ├── docs/
 │   ├── TUN-MODE.md

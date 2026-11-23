@@ -7,7 +7,8 @@
 #   MODE=gui  sudo -E ./install.sh # 仅图形界面 Clash Verge Rev
 #   MODE=both sudo -E ./install.sh # 两者都装
 #
-# 国内网络加速：GH_PROXY=https://ghfast.top/ sudo -E ./install.sh
+# 国内网络加速（可选）：默认会自动尝试 gh-proxy.com 等镜像
+# 也可指定：GH_PROXY=https://gh-proxy.com/ sudo -E ./install.sh
 # ============================================================================
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -9,8 +9,12 @@ need_root
 require_debian
 install_deps
 
-# 1. 安装内核
-install_mihomo
+# 1. 安装内核（已存在则跳过；仓库内置内核，无需联网）
+if [ -x "${MIHOMO_BIN}" ] && [ "${FORCE_REINSTALL:-0}" != "1" ]; then
+  log "检测到已有内核：$("${MIHOMO_BIN}" -v)，跳过下载（FORCE_REINSTALL=1 可强制重装）"
+else
+  install_mihomo
+fi
 
 # 2. TUN 前置条件
 setup_tun
