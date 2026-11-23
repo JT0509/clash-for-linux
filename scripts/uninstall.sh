@@ -11,6 +11,7 @@ info "停止并移除 mihomo 服务"
 systemctl stop mihomo 2>/dev/null || true
 systemctl disable mihomo 2>/dev/null || true
 rm -f "${SERVICE_FILE}"
+rm -rf "${SERVICE_FILE}.d"
 systemctl daemon-reload 2>/dev/null || true
 
 info "移除内核二进制"

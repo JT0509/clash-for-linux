@@ -52,11 +52,12 @@ if grep -qE '^(proxies|proxy-providers):' "${CONFIG_DIR}/config.yaml" \
 fi
 
 log "命令行模式安装完成"
+if [ "${SETUP_MODE:-0}" != "1" ]; then
 cat <<EOF
 
 下一步（务必执行，否则只有空模板无法上网）：
   cd ${REPO_DIR}
-  sudo ./scripts/import-subscription.sh "<你的订阅链接>"
+  sudo ./scripts/import-subscription.sh
 
 然后启动并查看状态：
   sudo systemctl restart mihomo
@@ -70,3 +71,4 @@ cat <<EOF
 TUN 模式已在配置中默认开启；若同一台机器稍后安装 GUI，
 请勿同时开启两者的 TUN（会争抢路由表）。
 EOF
+fi

@@ -59,7 +59,8 @@ MODE=both sudo -E ./install.sh
 向用户索取订阅链接（或读取 `SUBSCRIPTION.local.txt`），然后：
 
 ```bash
-sudo ./scripts/import-subscription.sh "<订阅链接>"
+sudo ./scripts/import-subscription.sh
+# 按提示粘贴订阅链接；输入不回显，不进入 shell 历史
 ```
 
 脚本会自动校验配置并在成功后重启服务。**不要**把链接写入任何被 git 跟踪的文件。
@@ -102,7 +103,7 @@ sudo nft list ruleset | grep -i mihomo
 |---|---|
 | GitHub 下载失败 | 脚本会自动尝试 `gh-proxy.com` / `ghfast.top` / `ghproxy.net`；仍失败可设 `GH_PROXY=https://gh-proxy.com/` |
 | 内核已内置 | CLI 模式无需下载内核：`bin/mihomo-linux-amd64.gz` |
-| 配置校验失败 | 按 `mihomo -t` 输出修正；现场在 `/tmp/mihomo-config.failed.yaml` |
+| 配置校验失败 | 按 `mihomo -t` 输出修正；脚本会打印失败配置的随机路径（600），旧配置未被覆盖 |
 | 服务启动失败 | `journalctl -u mihomo -n 100` |
 | 订阅是 base64 | 让用户在机场后台切换为 Clash 格式 |
 | TUN 不通 | 检查 `/dev/net/tun`、`net.ipv4.ip_forward`、`nft list ruleset` |

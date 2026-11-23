@@ -72,9 +72,9 @@ curl -x http://127.0.0.1:7890 -sI https://www.google.com | head -1
 `import-subscription.sh` 会校验配置后才覆盖旧文件，失败不会破坏现有配置。
 
 - 提示 “base64 节点列表” → 到机场后台把订阅格式切到 **Clash**。
-- 提示 “配置校验失败” → 现场保存在 `/tmp/mihomo-config.failed.yaml`。
+- 提示 “配置校验失败” → 脚本会打印失败配置的随机路径（权限 600），旧配置未被覆盖。
 - 想重置配置：删除 `/etc/mihomo/config.yaml`，然后重新执行
-  `sudo ./scripts/import-subscription.sh "<订阅链接>"`。
+  `sudo ./scripts/import-subscription.sh`（按提示粘贴订阅链接）。
 
 ## 6. Clash Verge Rev（GUI）相关问题
 

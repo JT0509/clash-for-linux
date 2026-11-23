@@ -19,13 +19,14 @@ Clash for Windows（CFW）本质是 **Electron 图形外壳 + Clash 内核**：
    `D:\Program Files (x86)\clash\Clash.for.Windows\data\profiles\list.yml`，
    里面 `url:` 后面就是订阅链接（形如 `https://.../link/xxxx?clash=3`）。
 
-> 本仓库**不包含任何订阅链接**。请使用维护者单独提供的链接（`SUBSCRIPTION.local.txt`），或你自己的订阅。
+> 本仓库**不包含任何订阅链接**。订阅链接是账号凭证：请向维护者本人索取并取得明确许可后使用，或使用你自己的订阅；不要粘贴到 Issue、PR、README 或群聊中。
 
 ## 在 Linux 侧导入
 
 ```bash
 cd clash-for-linux
-sudo ./scripts/import-subscription.sh "你的订阅链接"
+sudo ./scripts/import-subscription.sh
+# 按提示粘贴订阅链接（输入不回显，不进入 shell 历史）
 ```
 
 脚本会自动识别：

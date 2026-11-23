@@ -2,7 +2,12 @@
 # ============================================================================
 # 导入订阅链接，生成可用的 /etc/mihomo/config.yaml
 #
+#   sudo ./scripts/import-subscription.sh
+#       （推荐：交互式粘贴，输入不回显，不进入 shell 历史）
 #   sudo ./scripts/import-subscription.sh "<订阅链接>"
+#       （兼容旧用法；参数可能进入 shell 历史 / sudo 日志）
+#   sudo ./scripts/import-subscription.sh --url-file FILE --recommended
+#       （自动化：从 600 文件读取链接，并强制 TUN + 规则模式）
 #
 # 兼容两种订阅返回：
 #   1) 完整 Clash 配置（含 proxies / proxy-groups / rules）→ 直接作为主配置
@@ -11,17 +16,81 @@
 set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
+# 订阅配置含节点凭证：本脚本新建的文件默认仅 root 可读
+umask 077
+
+SUB_URL=""
+URL_FILE=""
+RECOMMENDED=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --url-file)
+      URL_FILE="${2:-}"
+      [ -n "${URL_FILE}" ] || die "--url-file 需要一个文件路径"
+      shift 2
+      ;;
+    --url-file=*) URL_FILE="${1#*=}"; shift ;;
+    --recommended) RECOMMENDED=1; shift ;;
+    -h|--help)
+      cat <<'EOF'
+用法：
+  sudo ./scripts/import-subscription.sh
+      交互式粘贴订阅链接（推荐；输入不回显）
+  sudo ./scripts/import-subscription.sh "<订阅链接>"
+      参数方式（会留在 shell 历史和 sudo 日志，不推荐）
+  sudo ./scripts/import-subscription.sh --url-file FILE --recommended
+      从 600 权限文件读取链接，并套用推荐配置（TUN + 规则模式）
+EOF
+      exit 0
+      ;;
+    --*) die "未知参数：$1" ;;
+    *)
+      [ -z "${SUB_URL}" ] || die "只能提供一个订阅链接"
+      SUB_URL="$1"
+      shift
+      ;;
+  esac
+done
+
 need_root
 
-SUB_URL="${1:-}"
-[ -n "${SUB_URL}" ] || die "用法：sudo $0 \"<订阅链接>\""
+if [ -n "${URL_FILE}" ]; then
+  [ -r "${URL_FILE}" ] || die "无法读取 URL 文件：${URL_FILE}"
+  SUB_URL="$(cat "${URL_FILE}")"
+  [ -n "${SUB_URL}" ] || die "URL 文件为空：${URL_FILE}"
+elif [ -n "${SUB_URL}" ]; then
+  warn "通过命令行参数传入订阅链接可能留在 shell 历史和 sudo 日志中；建议不带参数运行，按提示粘贴。"
+elif [ -t 0 ]; then
+  read -rsp "请输入订阅链接（输入不回显，不会写入 shell 历史）: " SUB_URL
+  echo
+else
+  die "用法：sudo $0（在终端交互运行，按提示粘贴订阅链接）"
+fi
+[ -n "${SUB_URL}" ] || die "订阅链接不能为空"
+case "${SUB_URL}" in
+  https://*) : ;;
+  http://*) warn "订阅链接不是 HTTPS，凭证可能以明文传输；建议在机场后台启用 HTTPS。" ;;
+  *) die "订阅链接必须以 http:// 或 https:// 开头" ;;
+esac
 [ -x "${MIHOMO_BIN}" ] || die "未找到 mihomo，请先运行 sudo ./install.sh 选择命令行模式"
 
 tmp="$(mktemp)"
 new="$(mktemp)"
-trap 'rm -f "${tmp}" "${new}"' EXIT
+curl_cfg=""
+trap 'rm -f "${tmp}" "${new}"; if [ -n "${curl_cfg}" ]; then rm -f "${curl_cfg}"; fi' EXIT
 
-download "${SUB_URL}" "${tmp}"
+# 订阅是账号凭证：只直连订阅服务，绝不经过 GitHub 镜像/第三方代理。
+info "下载订阅（仅直连，不经过第三方镜像）"
+curl_cfg="$(mktemp)"
+chmod 600 "${curl_cfg}"
+escaped="$(printf '%s' "${SUB_URL}" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+printf 'url = "%s"\n' "${escaped}" > "${curl_cfg}"
+if ! curl -fL --retry 2 --retry-delay 1 --connect-timeout 15 --max-time 300 \
+     --config "${curl_cfg}" -o "${tmp}"; then
+  die "订阅下载失败：请检查链接是否有效、网络是否可达订阅服务（不会把链接发往镜像站）"
+fi
+rm -f "${curl_cfg}"
+curl_cfg=""
 
 # ---- 内容识别 ----
 if grep -qE '^[[:space:]]*proxies:' "${tmp}"; then
@@ -54,6 +123,14 @@ geox-url:
 EOF
 )"
 
+  # 常见订阅会写 port: 7890；若再追加同端口的 mixed-port 会 bind 冲突。
+  # 已存在 mixed-port 时，注释掉使用同一端口的 port / socks-port 行。
+  mixed_value="$(awk -F: '/^[[:space:]]*mixed-port:/ {v=$2; gsub(/[^0-9]/, "", v); print v; exit}' "${new}")"
+  if [ -n "${mixed_value}" ]; then
+    sed -i -E "s/^([[:space:]]*)port:[[:space:]]*${mixed_value}([[:space:]]*(#.*)?)$/# clash-for-linux: mixed-port 已接管 HTTP，原 port 行已注释：\1port: ${mixed_value}\2/" "${new}"
+    sed -i -E "s/^([[:space:]]*)socks-port:[[:space:]]*${mixed_value}([[:space:]]*(#.*)?)$/# clash-for-linux: mixed-port 已包含 SOCKS，原 socks-port 行已注释：\1socks-port: ${mixed_value}\2/" "${new}"
+  fi
+
   if ! grep -qE '^tun:' "${new}"; then
     info "配置中无 tun 段，追加 TUN 模式设置"
     cat >> "${new}" <<'EOF'
@@ -79,10 +156,48 @@ else
   fetch_repo_file "config/config.file-provider.yaml" "${new}"
 fi
 
+if [ "${RECOMMENDED}" = "1" ]; then
+  # 新手推荐：规则模式 + TUN 开启
+  if grep -qE '^mode:' "${new}"; then
+    sed -i -E 's/^mode:[[:space:]]*.*/mode: rule/' "${new}"
+  else
+    printf '\nmode: rule\n' >> "${new}"
+  fi
+  info "推荐配置：mode: rule"
+
+  if grep -qE '^external-controller:' "${new}"; then
+    sed -i -E 's/^external-controller:[[:space:]]*.*/external-controller: 127.0.0.1:9090/' "${new}"
+  fi
+  info "推荐配置：external-controller 仅本机"
+
+  # 在 tun: 块内把 enable 改为 true；没有 enable 行则按同缩进插入
+  awk '
+    BEGIN { in_tun=0; seen=0; ind="" }
+    /^tun:[[:space:]]*(#.*)?$/ { in_tun=1; seen=0; ind=""; print; next }
+    in_tun {
+      if ($0 ~ /^[^[:space:]]/) {
+        if (!seen) print (ind == "" ? "  " : ind) "enable: true"
+        in_tun=0; seen=0
+        print; next
+      }
+      if (ind == "" && match($0, /^[[:space:]]+/)) ind=substr($0, 1, RLENGTH)
+      if ($0 ~ /^[[:space:]]+enable:[[:space:]]*/) {
+        sub(/enable:.*/, "enable: true"); print; seen=1; next
+      }
+      print; next
+    }
+    { print }
+    END { if (in_tun && !seen) print (ind == "" ? "  " : ind) "enable: true" }
+  ' "${new}" > "${new}.tmp"
+  mv "${new}.tmp" "${new}"
+  info "推荐配置：tun.enable: true"
+fi
+
 # ---- 校验配置 ----
-if ! "${MIHOMO_BIN}" -t -f "${new}"; then
-  cp "${new}" /tmp/mihomo-config.failed.yaml
-  die "配置校验失败，现场保留在 /tmp/mihomo-config.failed.yaml（旧配置未被覆盖）"
+if ! "${MIHOMO_BIN}" -t -d "${CONFIG_DIR}" -f "${new}"; then
+  failed="$(mktemp /tmp/mihomo-config.failed.XXXXXX.yaml)"
+  install -m 0600 "${new}" "${failed}"
+  die "配置校验失败，现场保留在 ${failed}（600，旧配置未被覆盖）"
 fi
 
 install -m 0600 "${new}" "${CONFIG_DIR}/config.yaml"

@@ -131,7 +131,7 @@ install_mihomo() {
   tmp="$(mktemp -d)"
 
   local bundled="${REPO_DIR}/bin/mihomo-linux-${arch}.gz"
-  if [ -f "${bundled}" ]; then
+  if [ "${PREFER_BUNDLED:-1}" = "1" ] && [ -f "${bundled}" ]; then
     info "使用仓库内置内核：${bundled}"
     gzip -t "${bundled}" || { rm -rf "${tmp}"; die "内置内核压缩包损坏"; }
     gzip -dc "${bundled}" > "${tmp}/mihomo"
